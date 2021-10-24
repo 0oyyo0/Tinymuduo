@@ -116,7 +116,7 @@ Channel::Channel(EventLoop* loop, int fd__)
 }
 ```
 
-+ 到此，在muduo库内部的初始化过程已经基本处理完毕，然后由用户调用TcpServer的setThreadNum()和start()函数。在start()函数中会将打开Acceptor对象linten套接字。
++ 到此，在muduo库内部的初始化过程已经基本处理完毕，然后由用户调用TcpServer的setThreadNum()和start()函数。在start()函数中将会打开Acceptor对象listen套接字。
 ```c++
 void TcpServer::setThreadNum(int numThreads)
 {//设置线程池的开始数目
@@ -254,14 +254,14 @@ void EventLoop::loop()
 一个监听套接字已经进入循环，如果此时一个新的连接到来又会发生什么事情呢？
 
 ### 一个新连接到达时的处理过程
-+ 此时在loop循环中的监听套接字变得可读，然后便调用一个可读事件的处理对象。首先调用Acceptor注册的handleRead对象，完成连接套接字的创建，其次在handleRead对象的内部调用TcpServer注册给Acceptor的函数对象，用于将新建con对象加入TcpServer的ConnectionMap中去。
++ 此时在loop循环中的监听套接字变得可读，然后便调用一个可读事件的处理对象。首先调用Acceptor注册的handleRead对象，完成连接套接字的创建，其次在handleRead对象的内部调用TcpServer注册给Acceptor的函数对象，用于将新建conn对象加入TcpServer的ConnectionMap中去。
 ```c++
 void Channel::handleEvent(Timestamp receiveTime)
 {
   boost::shared_ptr<void> guard;
   if (tied_)
   {
-    guard = tie_.lock();//提升成功说明con存在
+    guard = tie_.lock();//提升成功说明conn存在
     if (guard)//这样做比较保险
     {
       handleEventWithGuard(receiveTime);
@@ -460,9 +460,9 @@ void PollPoller::updateChannel(Channel* channel)
 ```
 最后一个连接的channel加入loop循环，新的循环已经开始了。
 
-模拟单线程情况下muduo库的工作情况
+### 模拟单线程情况下muduo库的工作情况
 
-+ 在上篇中，笔者追踪了Connetfd（连接套接字）和Listenfd（监听套接字）的Channel对象加入到loop循环的过程。其中包括了网络连接过程中，muduo会创建的对象。本文将会追踪Connetfd（连接套接字）和Listenfd（监听套接字）从loop循环退出并且销毁，一直到main函数终止的过程。
++ 在上面，我们追踪了Connetfd（连接套接字）和Listenfd（监听套接字）的Channel对象加入到loop循环的过程。其中包括了网络连接过程中，muduo会创建的对象。下文将会追踪Connetfd（连接套接字）和Listenfd（监听套接字）从loop循环退出并且销毁，一直到main函数终止的过程。
 #### 连接套接字正常情况下完整的销毁情况（read == 0）
 
 + 由TcpConnection对象向自己所拥有的Channel对象注册的可读事件结束时，会出现read == 0的情况，此时会直接调用TcpConnection对象的handleClose函数。因为在向Channel对象注册可读事件时，使用了如下的语句：
@@ -616,30 +616,30 @@ void PollPoller::removeChannel(Channel* channel)
   }
 }
 ```
-+ 以上便是一个连接的销毁过程，现在依然让人迷惑的时Channel对象到底被谁持有过？以及TcpConnection对象的生命周期到底在什么时候结束？
-Channel与TcpConnection对象的创建与销毁
-创建
++ 以上便是一个连接的销毁过程，现在依然让人迷惑的是Channel对象到底被谁持有过？以及TcpConnection对象的生命周期到底在什么时候结束？
+### Channel与TcpConnection对象的创建与销毁
+#### 创建
 
-下面，在让我们进入上一篇文章，具体的看看Channel对象的生命期到底是个什么样子？
+下面，我们具体的看看Channel对象的生命期到底是个什么样子？
 
-    当新连接过来时，由TcpServer创建一个TcpConnection对象，这个对象中包括一个与此连接相关的Channel对象。
-    然后紧接着TcpServer使用创建的TcpConnection对象向Loop中注册事件。此时的控制权回到TcpConnection对象手中。它操作自己的Channel对象更新EventLoop。
-    最后由EventLoop对象去操作自己的Poller更新Poller的Channel队列。
-    在上述过程中，Channel对象的创建操作有这样的顺序：
-```c++
-TcpServer->TcpConnection->Channel->EventLoop->Poller
-```
++ 首先，当新连接过来时，由TcpServer创建一个TcpConnection对象，这个对象中包括一个与此连接相关的Channel对象。
++ 然后紧接着TcpServer使用创建的TcpConnection对象向Loop中注册事件。此时的控制权回到TcpConnection对象手中。它操作自己的Channel对象更新EventLoop。
++ 最后由EventLoop对象去操作自己的Poller更新Poller的Channel队列。
++ 在上述过程中，Channel对象的创建操作有这样的顺序：
+
+        TcpServer->TcpConnection->Channel->EventLoop->Poller
+
 + TcpConnection对象的创建过程相比于Channel简单的多：
-```c++
-TcpServer->TcpConnection
-```
+
+        TcpServer->TcpConnection
+
 + 在TcpServer中创建Connection对象，然后让TcpConnection对象去操作自己的Channel对象，将Channel加入到EventLoop中去，最后由EventLoop操作自己的Poller收尾。总而言之，Channel对象在整个过程中只由Poller和TcpConnection对象持有，销毁时也应该是如此过程。
-销毁
+#### 销毁
 
 + 由于Channel是TcpConnection对象的一部分，所以Channel的生命周期一定会比TcpConnection的短。
 Channel与TcpConnection对象的销毁基本与上述创建过程相同：
-```c++
-TcpConnection->TcpServer->Channel->EventLoop->Poller
-```
-+ 随着，Channel对象从Poller中移除，TcpConnection的生命周期也随之结束。
+
+        TcpConnection->TcpServer->Channel->EventLoop->Poller
+
++ 随着Channel对象从Poller中移除，TcpConnection的生命周期也随之结束。
 TcpConnection对象在整个生命周期中只由TcpServer持有，但是TcpConnetion对象中的Channel又由Poller持有，Poller又是EventLoop的唯一成员，所以造成了如此麻烦的清理与创建过程。那如果能将Channel移出TcpConnection对象，那muduo的创建与清理工作会不会轻松很多？
