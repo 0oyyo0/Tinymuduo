@@ -35,10 +35,10 @@ TcpServer::TcpServer(EventLoop* loop,
     connectionCallback_(defaultConnectionCallback),
     messageCallback_(defaultMessageCallback),
     nextConnId_(1)
-{// 注册给acceptor的回调
+{//上面的loop是用户提供的loop
   acceptor_->setNewConnectionCallback(
-      std::bind(&TcpServer::newConnection, this, _1, _2));
-}
+      boost::bind(&TcpServer::newConnection, this, _1, _2));//注册给acceptor的回调
+}//将在Acceptor接受新连接的时候
 
 TcpServer::~TcpServer()
 {
