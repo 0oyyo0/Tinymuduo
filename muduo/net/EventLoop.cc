@@ -123,38 +123,36 @@ updateChannel，在当前线程中进行removeChannel。
 *********************************************************************/
 void EventLoop::loop()
 {
-  assert(!looping_);
-  assertInLoopThread();
-  looping_ = true;
-  quit_ = false;
+  assert(!looping_);//判断是否在LOOPING
+  assertInLoopThread();//判断这个函数在LOOP线程调用
+  looping_ = true;//进入LOOPING状态
+  quit_ = false;  // FIXME: what if someone calls quit() before loop() ?
   LOG_TRACE << "EventLoop " << this << " start looping";
+
   while (!quit_)
   {
-    activeChannels_.clear();
-    // 调用poll获得活跃的channel（activeChannels_）
-    pollReturnTime_ = poller_->poll(kPollTimeMs, &activeChannels_);
-    // 增加Poll次数
-    ++iteration_;
+    activeChannels_.clear();//将活动线程队列置空
+    pollReturnTime_ = poller_->poll(kPollTimeMs, &activeChannels_);//获得活动文件描述符的数量，并且获得活动的channel队列
+    ++iteration_;//增加Poll次数
     if (Logger::logLevel() <= Logger::TRACE)
     {
       printActiveChannels();
     }
-    // 事件处理开始
-    eventHandling_ = true;
-    // 遍历活跃的channel，执行每一个channel上的回调函数
-    for (Channel* channel : activeChannels_)
+    // TODO sort channel by priority
+    eventHandling_ = true;//事件处理状态
+    for (ChannelList::iterator it = activeChannels_.begin();
+        it != activeChannels_.end(); ++it)
     {
-      currentActiveChannel_ = channel;
-      currentActiveChannel_->handleEvent(pollReturnTime_);
+      currentActiveChannel_ = *it;//获得当前活动的事件
+      currentActiveChannel_->handleEvent(pollReturnTime_);//处理事件，传递一个poll的阻塞时间
     }
-    currentActiveChannel_ = NULL;
-    // 事件处理结束
-    eventHandling_ = false;
-    // 处理用户在其他线程注册给IO线程的事件
-    doPendingFunctors(); 
+    currentActiveChannel_ = NULL;//将当前活动事件置为空
+    eventHandling_ = false;//退出事件处理状态
+    doPendingFunctors();//处理用户在其他线程注册给IO线程的事件
   }
+
   LOG_TRACE << "EventLoop " << this << " stop looping";
-  looping_ = false;
+  looping_ = false;//推出LOOPING状态
 }
 
 /******************************************************************** 

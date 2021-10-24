@@ -73,38 +73,37 @@ void PollPoller::fillActiveChannels(int numEvents,
 }
 
 void PollPoller::updateChannel(Channel* channel)
-{
-  Poller::assertInLoopThread();
+{//将channel关注的事件与pollfd同步
+  Poller::assertInLoopThread();//如果不再loop线程直接退出
   LOG_TRACE << "fd = " << channel->fd() << " events = " << channel->events();
-  if (channel->index() < 0)
+  if (channel->index() < 0)//获得channel在map中的位置
   {
     // a new one, add to pollfds_
     assert(channels_.find(channel->fd()) == channels_.end());
-    struct pollfd pfd;
+    struct pollfd pfd;//新建一个pfd与channel相关联
     pfd.fd = channel->fd();
-    pfd.events = static_cast<short>(channel->events());
-    pfd.revents = 0;
-    pollfds_.push_back(pfd);
-    int idx = static_cast<int>(pollfds_.size())-1;
-    channel->set_index(idx);
-    channels_[pfd.fd] = channel;
+    pfd.events = static_cast<short>(channel->events());//关注的事件设置为channel关注的事件
+    pfd.revents = 0;//正在发生的事件为0
+    pollfds_.push_back(pfd);//将设置好的pollfd加入关注事件列表
+    int idx = static_cast<int>(pollfds_.size())-1;//并且获得加入的位置
+    channel->set_index(idx);//channel保存自己在pollfds中的位置
+    channels_[pfd.fd] = channel;//channel将自己加入到channelmap中
   }
   else
   {
     // update existing one
     assert(channels_.find(channel->fd()) != channels_.end());
-    assert(channels_[channel->fd()] == channel);
-    int idx = channel->index();
+    assert(channels_[channel->fd()] == channel);//判断位置是否正确
+    int idx = channel->index();//获得channel在pollfd中的索引
     assert(0 <= idx && idx < static_cast<int>(pollfds_.size()));
-    struct pollfd& pfd = pollfds_[idx];
+    struct pollfd& pfd = pollfds_[idx];//获得索引
     assert(pfd.fd == channel->fd() || pfd.fd == -channel->fd()-1);
-    pfd.fd = channel->fd();
-    pfd.events = static_cast<short>(channel->events());
-    pfd.revents = 0;
-    if (channel->isNoneEvent())
+    pfd.events = static_cast<short>(channel->events());//修改关注的事件
+    pfd.revents = 0;//将当前发生的事件设置为0
+    if (channel->isNoneEvent())//如果channel没有任何事件
     {
       // ignore this pollfd
-      pfd.fd = -channel->fd()-1;
+      pfd.fd = -channel->fd()-1;//将索引设置为原来索引的负数
     }
   }
 }
