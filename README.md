@@ -1,26 +1,27 @@
 # 一次muduo库中TcpServer工作的完整流程
+
 ## 单线程情况下muduo库的工作
 
-+ 下面将追踪一次TCP连接过程中发生的事情，不会出现用户态的源码，都是库内部的运行机制。
-### 监听套接字加入loop循环的完整过程
-+ 首先创建一个TcpServer对象，在创建过程中，首先new出来自己的核心组件（Acceptor,loop,connectionMap,threadPool），之后TcpServer会向Acceptor注册一个新连接到来时的Connection回调函数。loop是由用户提供的，并且在最后向Acceptor注册一个回调对象，用于处理：一个新Client连接到来时应该怎么处理。
-+ TcpServer向Acceptor注册的回调代码主要作用是：当一个新连接到来时，根据Acceptor创建的可连接描述符和客户的地址，创建一个Connection对象，并且将这个对象加入到TcpServer的ConnectionMap中，由TcpServer来管理上述新建conn对象。但是现在监听套接字的事件分发对象Channel还没有加入loop，就先不多提这个新的连接到到来时的处理过程。
++ 下面将详细讲述在muduo网络库中一次TCP连接过程中发生的事情，不会出现用户态的源码，都是库内部的运行机制。
+### 把监听套接字加入loop循环
++ 首先创建一个TcpServer对象，在构造函数中，先new出来自己的核心组件(Acceptor,loop,connectionMap,threadPool)，之后TcpServer会向Acceptor注册一个新连接到来时的回调函数newConnection，用于处理一个新Client连接到来时应该怎么做的问题。
++ TcpServer向Acceptor注册的回调函数newConnection的主要作用是：当一个新连接到来时，根据Acceptor创建的可连接描述符sockfd和客户的地址peerAddr，创建一个TcpConnection对象，并且将这个对象加入到TcpServer的ConnectionMap中，由TcpServer来管理上述新建的TcpConnection对象。目前为止监听套接字的事件分发对象Channel还没有加入loop，就先不多提这个新的连接到到来时的处理过程，后面再详述。
 
 ```cpp
 TcpServer::TcpServer(EventLoop* loop,const InetAddress& listenAddr,const string& nameArg,Option option)
-    : loop_(CHECK_NOTNULL(loop)),
+    : loop_(CHECK_NOTNULL(loop)),//loop是由用户提供的
       ipPort_(listenAddr.toIpPort()),name_(nameArg),acceptor_(new Acceptor(loop, listenAddr, option == kReusePort)),
     threadPool_(new EventLoopThreadPool(loop, name_)),
     connectionCallback_(defaultConnectionCallback),
     messageCallback_(defaultMessageCallback),
     nextConnId_(1)
-{//上面的loop是用户提供的loop
+{
   acceptor_->setNewConnectionCallback(
       boost::bind(&TcpServer::newConnection, this, _1, _2));//注册给acceptor的回调
-}//将在Acceptor接受新连接的时候
+}//将在Acceptor接受新连接的时候回调
 
 void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr)
-{//将本函数注册个acceptor
+{//将本函数注册到acceptor
   loop_->assertInLoopThread();//断言是否在IO线程
   EventLoop* ioLoop = threadPool_->getNextLoop();//获得线程池中的一个loop
   char buf[64];//获得线程池map中的string索引
@@ -48,7 +49,9 @@ void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr)
   ioLoop->runInLoop(boost::bind(&TcpConnection::connectEstablished, conn));//在某个线程池的loop中加入这个con
 }
 ```
-+ 下面接着讲述在TcpServer的构造过程中发生的事情：创建Acceptor对象。TcpServer用unique_ptr持有唯一的指向Acceptor的指针。Acceptor的构造函数完成了一些常见的选项。最后的一个向Acceptor->Channel注册一个回调函数，用于处理：listening可读时（新的连接到来），该怎么办？答案是：当新的连接到来时，创建一个已连接描述符，然后调用TcpServe注册给Acceptor的回调函数，用于处理新的连接。
++ 下面接着描述在TcpServer的构造过程中发生的事情：创建Acceptor对象。TcpServer使用unique_ptr指向Acceptor的对象。Acceptor的构造函数完成了一些常见的选项。最后的一个向Acceptor->Channel注册一个回调函数，用于处理：listening可读时（新的连接到来），该怎么办？答案是：当新的连接到来时，创建一个已连接描述符，然后调用TcpServe注册给Acceptor的回调函数，用于处理新的连接。即TcpServer传给Acceptor的回调函数，又由Acceptor注册给Channel，换句话说，新连接到来时执行的操作由用户指定，并最终在Channel中执行。
++ 特别的，写服务器应用程序必须要考虑到服务器资源不足的情况，其中常见的一个是打开的文件数量（文件描述符数量）不能超过系统限制，当接受的连接太多时就会到达系统的限制，即表示打开的套接字文件描述符太多，从而导致accpet失败，返回EMFILE错误，但此时连接已经在系统内核建立好了，所以占用了系统的资源，我们不能让接受不了的连接继续占用系统资源，如果不处理这种错误就会有越来越多的内核连接建立，系统资源被占用也会越来越多，直到系统崩溃。一个常见的处理方式就是，先打开一个文件，预留一个文件描述符，出现EMFILE错误的时候，把打开的文件关闭，此时就会空出一个可用的文件描述符，再次调用accept就会成功，接受到客户连接之后，我们马上把它关闭，这样这个连接在系统中占用的资源就会被释放。关闭之后又会有一个文件描述符空闲，我们再次打开一个文件，占用文件描述符，等待下一次的EMFILE错误。
+
 ```c++
 Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reuseport)
   : loop_(loop),
@@ -62,7 +65,7 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reusepor
   acceptSocket_.setReusePort(reuseport);
   acceptSocket_.bindAddress(listenAddr);
   acceptChannel_.setReadCallback(
-      boost::bind(&Acceptor::handleRead, this));//Channel设置回调，当sockfd可读时掉用设置的回调
+      boost::bind(&Acceptor::handleRead, this));//Channel设置回调，当sockfd可读时调用设置的回调函数
 }
 
 void Acceptor::handleRead()
@@ -100,7 +103,7 @@ void Acceptor::handleRead()
   }
 }
 ```
-+ 在上述Acceptor对象的创建过程中，Acceptor会创建一个用于处理监听套接字事件的Channel对象，以下Acceptor的Channel对象的创造过程，很常规的处理过程。
++ 在上述Acceptor对象的创建过程中，Acceptor会创建一个用于处理监听套接字事件的Channel对象，以下是Acceptor的Channel对象的创造过程。
 ```c++
 Channel::Channel(EventLoop* loop, int fd__)
   : loop_(loop),
@@ -116,7 +119,7 @@ Channel::Channel(EventLoop* loop, int fd__)
 }
 ```
 
-+ 到此，在muduo库内部的初始化过程已经基本处理完毕，然后由用户调用TcpServer的setThreadNum()和start()函数。在start()函数中将会打开Acceptor对象listen套接字。
++ 到此，在muduo库内部的初始化过程已经基本处理完毕，然后由用户调用TcpServer的setThreadNum()和start()函数。在start()函数中将会打开Acceptor对象的listen套接字。
 ```c++
 void TcpServer::setThreadNum(int numThreads)
 {//设置线程池的开始数目
@@ -147,7 +150,7 @@ void Acceptor::listen()
   acceptChannel_.enableReading();//让监听字的channel关注可读事件
 }
 ```
-+ 接着使用了Channel对象中的的enableReading()函数，让这个Channel对象关注可读事件。关键在于更新过程，应该是这个流程中最重要的操作。
++ 接着使用了Channel对象中的的enableReading()函数，让这个Channel对象关注可读事件。关键在于<font face='黑体' color=red>更新过程</font>，应该是这个流程中最重要的操作。
 ```c++
 void enableReading() { events_ |= kReadEvent; update(); }//将关注的事件变为可读，然后更新
 ```
@@ -160,7 +163,7 @@ void Channel::update()
   loop_->updateChannel(this);//调用POLLER的更新功能
 }
 ```
-+ EventLoop持有唯一的Poller，也就是说，这个Poller将负责最后的更新过程。如果是新的Channel对象，则在Poller的pollfd数组中增加席位；如果不是新的Channel对象，则更新它目前所发生的事件（将目前发生的事件设置为0）。
++ EventLoop持有唯一的Poller，也就是说，这个<font face='黑体' color=red>Poller将负责最后的更新过程</font>。
 ```c++
 void EventLoop::updateChannel(Channel* channel)
 {
@@ -170,7 +173,7 @@ void EventLoop::updateChannel(Channel* channel)
 }
 ```
 
-+ 紧接着使用了Poller的updateChannel函数
++ 紧接着使用了Poller的updateChannel函数。如果是新的Channel对象，则在Poller的pollfd数组中增加席位；如果不是新的Channel对象，则更新它目前所发生的事件（将目前发生的事件设置为0）。
 ```c++
 void PollPoller::updateChannel(Channel* channel)
 {//将channel关注的事件与pollfd同步
@@ -200,7 +203,7 @@ void PollPoller::updateChannel(Channel* channel)
     assert(pfd.fd == channel->fd() || pfd.fd == -channel->fd()-1);
     pfd.events = static_cast<short>(channel->events());//修改关注的事件
     pfd.revents = 0;//将当前发生的事件设置为0
-    if (channel->isNoneEvent())//如果channel没有任何事件，一个暂时熄火的channel
+    if (channel->isNoneEvent())//如果channel没有任何事件
     {
       // ignore this pollfd
       pfd.fd = -channel->fd()-1;//将索引设置为原来索引的负数
@@ -242,14 +245,9 @@ void EventLoop::loop()
   }
 
   LOG_TRACE << "EventLoop " << this << " stop looping";
-  looping_ = false;//推出LOOPING状态
+  looping_ = false;//退出LOOPING状态
 }
 ```
-
-
-
-
-
 
 一个监听套接字已经进入循环，如果此时一个新的连接到来又会发生什么事情呢？
 
@@ -307,7 +305,7 @@ void Channel::handleEventWithGuard(Timestamp receiveTime)
 }
 ```
 
-+ 此时，监听套接字处理的时可读事件，调用之前由Acceptor注册的handleRead回调函数
++ 此时，监听套接字处理的是可读事件，调用之前由Acceptor注册的handleRead回调函数
 ```c++
 void Acceptor::handleRead()
 {
@@ -345,7 +343,7 @@ void Acceptor::handleRead()
 }
 ```
 
-+ 在上述函数中又调用，由TcpServer注册给Acceptor的回调函数
++ 在上述函数中又调用由TcpServer注册给Acceptor的回调函数
 ```c++
 void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr)
 {//将本函数注册个acceptor
@@ -424,7 +422,7 @@ void EventLoop::updateChannel(Channel* channel)
 ```c++
 void PollPoller::updateChannel(Channel* channel)
 {//将channel关注的事件与pollfd同步
-  Poller::assertInLoopThread();//如果不再loop线程直接退出
+  Poller::assertInLoopThread();//如果不在loop线程直接退出
   LOG_TRACE << "fd = " << channel->fd() << " events = " << channel->events();
   if (channel->index() < 0)//获得channel在map中的位置
   {
