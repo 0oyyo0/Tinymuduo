@@ -40,17 +40,18 @@ void TcpServer::newConnection(int sockfd, const InetAddress& peerAddr)
                                           sockfd,
                                           localAddr,
                                           peerAddr));//构建了一个connection
-  connections_[connName] = conn;//将新构建的con加入server的map中
-  conn->setConnectionCallback(connectionCallback_);//muduo默认的
-  conn->setMessageCallback(messageCallback_);//moduo默认的
-  conn->setWriteCompleteCallback(writeCompleteCallback_);//？？
+  connections_[connName] = conn;//将新构建的connection加入server的map中
+  conn->setConnectionCallback(connectionCallback_);
+  conn->setMessageCallback(messageCallback_);
+  conn->setWriteCompleteCallback(writeCompleteCallback_);
   conn->setCloseCallback(
       boost::bind(&TcpServer::removeConnection, this, _1)); // FIXME: unsafe
-  ioLoop->runInLoop(boost::bind(&TcpConnection::connectEstablished, conn));//在某个线程池的loop中加入这个con
+  ioLoop->runInLoop(boost::bind(&TcpConnection::connectEstablished, conn));//在某个线程池的loop中加入这个connection
 }
 ```
-+ 下面接着描述在TcpServer的构造过程中发生的事情：创建Acceptor对象。TcpServer使用unique_ptr指向Acceptor的对象。Acceptor的构造函数完成了一些常见的选项。最后的一个向Acceptor->Channel注册一个回调函数，用于处理：listening可读时（新的连接到来），该怎么办？答案是：当新的连接到来时，创建一个已连接描述符，然后调用TcpServe注册给Acceptor的回调函数，用于处理新的连接。即TcpServer传给Acceptor的回调函数，又由Acceptor注册给Channel，换句话说，新连接到来时执行的操作由用户指定，并最终在Channel中执行。
-+ 特别的，写服务器应用程序必须要考虑到服务器资源不足的情况，其中常见的一个是打开的文件数量（文件描述符数量）不能超过系统限制，当接受的连接太多时就会到达系统的限制，即表示打开的套接字文件描述符太多，从而导致accpet失败，返回EMFILE错误，但此时连接已经在系统内核建立好了，所以占用了系统的资源，我们不能让接受不了的连接继续占用系统资源，如果不处理这种错误就会有越来越多的内核连接建立，系统资源被占用也会越来越多，直到系统崩溃。一个常见的处理方式就是，先打开一个文件，预留一个文件描述符，出现EMFILE错误的时候，把打开的文件关闭，此时就会空出一个可用的文件描述符，再次调用accept就会成功，接受到客户连接之后，我们马上把它关闭，这样这个连接在系统中占用的资源就会被释放。关闭之后又会有一个文件描述符空闲，我们再次打开一个文件，占用文件描述符，等待下一次的EMFILE错误。
++ 下面接着描述在TcpServer的构造过程中发生的事情：创建Acceptor对象。TcpServer使用unique_ptr指向Acceptor的对象。Acceptor的构造函数完成了一些常见的选项。最后的一个向Acceptor->Channel注册一个回调函数，用于处理：listening可读时（新的连接到来），该怎么办？答案是：当新的连接到来时，创建一个已连接描述符，然后调用TcpServe注册给Acceptor的回调函数，用于处理新的连接。即TcpServer传给Acceptor的回调函数，又由Acceptor“注册”给Channel，换句话说，新连接到来时执行的操作由用户指定，并最终在Channel中执行。
++ 特别的，写服务器应用程序必须要考虑到服务器资源不足的情况，其中常见的一个是打开的文件数量（文件描述符数量）不能超过系统限制，当接受的连接太多就会到达系统的限制，即表示打开的套接字文件描述符太多，从而导致accpet失败，返回EMFILE错误，但此时连接已经在系统内核建立好了，所以占用了系统的资源，我们不能让接受不了的连接继续占用系统资源，如果不处理这种错误就会有越来越多的内核连接建立，系统资源被占用也会越来越多，直到系统崩溃。
++ 一个常见的处理方式就是，先打开一个文件，预留一个文件描述符，出现EMFILE错误的时候，把打开的文件关闭，此时就会空出一个可用的文件描述符，再次调用accept就会成功，接受到客户连接之后，我们马上把它关闭，这样这个连接在系统中占用的资源就会被释放。关闭之后又会有一个文件描述符空闲，我们再次打开一个文件，占用文件描述符，等待下一次的EMFILE错误。
 
 ```c++
 Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reuseport)
@@ -65,7 +66,7 @@ Acceptor::Acceptor(EventLoop* loop, const InetAddress& listenAddr, bool reusepor
   acceptSocket_.setReusePort(reuseport);
   acceptSocket_.bindAddress(listenAddr);
   acceptChannel_.setReadCallback(
-      boost::bind(&Acceptor::handleRead, this));//Channel设置回调，当sockfd可读时调用设置的回调函数
+      boost::bind(&Acceptor::handleRead, this));//向Channel设置回调，当sockfd可读时调用设置的回调函数
 }
 
 void Acceptor::handleRead()
@@ -73,14 +74,14 @@ void Acceptor::handleRead()
   loop_->assertInLoopThread();//判断是否在IO线程
   InetAddress peerAddr;//客户的地址
   //FIXME loop until no more
-  int connfd = acceptSocket_.accept(&peerAddr);//获得连接的描述符
+  int connfd = acceptSocket_.accept(&peerAddr);//获得已连接的描述符
   if (connfd >= 0)
   {
     // string hostport = peerAddr.toIpPort();
     // LOG_TRACE << "Accepts of " << hostport;
     if (newConnectionCallback_)
     {
-      newConnectionCallback_(connfd, peerAddr);//TcpServer注册的，创建新的con,并且加入TcpServer的ConnectionMap中。
+      newConnectionCallback_(connfd, peerAddr);//TcpServer经由Acceptor注册的，创建新的conn,并且加入TcpServer的ConnectionMap中。
     }
     else
     {
@@ -119,7 +120,7 @@ Channel::Channel(EventLoop* loop, int fd__)
 }
 ```
 
-+ 到此，在muduo库内部的初始化过程已经基本处理完毕，然后由用户调用TcpServer的setThreadNum()和start()函数。在start()函数中将会打开Acceptor对象的listen套接字。
++ 到此，在muduo库内部的初始化过程已经基本处理完毕，然后由用户调用TcpServer的setThreadNum()和start()函数。在start()函数中将会打开Acceptor对象的listen监听套接字。
 ```c++
 void TcpServer::setThreadNum(int numThreads)
 {//设置线程池的开始数目
@@ -138,10 +139,8 @@ void TcpServer::start()
         boost::bind(&Acceptor::listen, get_pointer(acceptor_)));//打开acceptor的listening
   }
 }
-```
 
-+ 打开Acceptor对象的listenfd的详细过程。
-```c++
+//打开Acceptor对象的listenfd的详细过程
 void Acceptor::listen()
 {
   loop_->assertInLoopThread();//判断是否在IO线程
@@ -150,6 +149,8 @@ void Acceptor::listen()
   acceptChannel_.enableReading();//让监听字的channel关注可读事件
 }
 ```
+
+
 + 接着使用了Channel对象中的的enableReading()函数，让这个Channel对象关注可读事件。关键在于<font face='黑体' color=red>更新过程</font>，应该是这个流程中最重要的操作。
 ```c++
 void enableReading() { events_ |= kReadEvent; update(); }//将关注的事件变为可读，然后更新
@@ -177,7 +178,7 @@ void EventLoop::updateChannel(Channel* channel)
 ```c++
 void PollPoller::updateChannel(Channel* channel)
 {//将channel关注的事件与pollfd同步
-  Poller::assertInLoopThread();//如果不再loop线程直接退出
+  Poller::assertInLoopThread();//如果不在loop线程直接退出
   LOG_TRACE << "fd = " << channel->fd() << " events = " << channel->events();
   if (channel->index() < 0)//获得channel在map中的位置
   {
@@ -214,6 +215,9 @@ void PollPoller::updateChannel(Channel* channel)
 
 + 至此，调用EventLoop的loop函数，进行loop循环，开始处理事件。
 ```c++
+// 事件循环。在某线程中实例化EventLoop对象，这个线程
+// 就是IO线程，必须在IO线程中执行loop()操作，在当前IO线程中进行
+// updateChannel，在当前线程中进行removeChannel。
 void EventLoop::loop()
 {
   assert(!looping_);//判断是否在LOOPING
