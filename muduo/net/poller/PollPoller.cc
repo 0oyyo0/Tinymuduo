@@ -29,7 +29,7 @@ PollPoller::~PollPoller() = default;
 Timestamp PollPoller::poll(int timeoutMs, ChannelList* activeChannels)
 {
   // XXX pollfds_ shouldn't change
-  int numEvents = ::poll(&*pollfds_.begin(), pollfds_.size(), timeoutMs);
+  int numEvents = ::poll(&*pollfds_.begin(), pollfds_.size(), timeoutMs);//&* 
   int savedErrno = errno;
   Timestamp now(Timestamp::now());
   if (numEvents > 0)
@@ -55,10 +55,10 @@ Timestamp PollPoller::poll(int timeoutMs, ChannelList* activeChannels)
 void PollPoller::fillActiveChannels(int numEvents,
                                     ChannelList* activeChannels) const
 {
-  for (PollFdList::const_iterator pfd = pollfds_.begin();
+  for (PollFdList::const_iterator pfd = pollfds_.begin(); //遍历
       pfd != pollfds_.end() && numEvents > 0; ++pfd)
   {
-    if (pfd->revents > 0)
+    if (pfd->revents > 0) //如果revent>0说明产生了事件
     {
       --numEvents;
       ChannelMap::const_iterator ch = channels_.find(pfd->fd);
@@ -72,11 +72,11 @@ void PollPoller::fillActiveChannels(int numEvents,
   }
 }
 
-void PollPoller::updateChannel(Channel* channel)
+void PollPoller::updateChannel(Channel* channel) //注册和更新
 {//将channel关注的事件与pollfd同步
   Poller::assertInLoopThread();//如果不再loop线程直接退出
   LOG_TRACE << "fd = " << channel->fd() << " events = " << channel->events();
-  if (channel->index() < 0)//获得channel在map中的位置
+  if (channel->index() < 0)//获得channel在map中的位置 //index<0说明是一个新的通道
   {
     // a new one, add to pollfds_
     assert(channels_.find(channel->fd()) == channels_.end());
@@ -89,20 +89,22 @@ void PollPoller::updateChannel(Channel* channel)
     channel->set_index(idx);//channel保存自己在pollfds中的位置
     channels_[pfd.fd] = channel;//channel将自己加入到channelmap中
   }
-  else
+  else//index>=0 说明是更新一个已存在的通道
   {
     // update existing one
     assert(channels_.find(channel->fd()) != channels_.end());
     assert(channels_[channel->fd()] == channel);//判断位置是否正确
     int idx = channel->index();//获得channel在pollfd中的索引
     assert(0 <= idx && idx < static_cast<int>(pollfds_.size()));
-    struct pollfd& pfd = pollfds_[idx];//获得索引
+    struct pollfd& pfd = pollfds_[idx];//获得索引 //使用引用，无需拷贝
     assert(pfd.fd == channel->fd() || pfd.fd == -channel->fd()-1);
     pfd.events = static_cast<short>(channel->events());//修改关注的事件
     pfd.revents = 0;//将当前发生的事件设置为0
+    //将一个通道暂时更改为不关注事件，但不从poller中移除该通道
     if (channel->isNoneEvent())//如果channel没有任何事件
     {
       // ignore this pollfd
+      //实际上可以直接pfd.fd设置为-1，下面代码是为了removeChannel优化（负数不是一个合法的文件描述符；-1是为了适配0的情况）
       pfd.fd = -channel->fd()-1;//将索引设置为原来索引的负数
     }
   }

@@ -140,13 +140,13 @@ void EventLoop::loop()
     }
     // TODO sort channel by priority
     eventHandling_ = true;//事件处理状态
-    for (ChannelList::iterator it = activeChannels_.begin();
+    for (ChannelList::iterator it = activeChannels_.begin(); //遍历活动通道进行处理
         it != activeChannels_.end(); ++it)
     {
       currentActiveChannel_ = *it;//获得当前活动的事件
       currentActiveChannel_->handleEvent(pollReturnTime_);//处理事件，传递一个poll的阻塞时间
     }
-    currentActiveChannel_ = NULL;//将当前活动事件置为空
+    currentActiveChannel_ = NULL;//上面for将事件处理完后，将当前活动事件置为空
     eventHandling_ = false;//退出事件处理状态
     doPendingFunctors();//处理用户在其他线程注册给IO线程的事件
   }
