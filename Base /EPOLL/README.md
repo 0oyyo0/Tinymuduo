@@ -20,48 +20,48 @@ struct epoll_event{
 ```
 ### 基本操作
 
-    注意事项：
-        调用epoll_create时，返回一个内核维护的描述符，往后的所有操作依赖于这个描述符。size参数没什么用处，保证大于0就行。
-        调用epoll_ctl可以动态的改变内核维护的表格。在epollfd中加入和修改一个fd关注的事件时，需要用户提供event实例；在epollfd中删除一个fd时，传入保存数据的struct epoll_event结构体或者NULL
-        调用epoll_wait时，提供从epoll_create中获得描述符，和事先准备好的数组，最大的事件个数以及超时时间。在完成后，内核会将发生事件的struct epoll_event*拷贝到用户空间
-    事件类型：
-        EPOLLERR：文件出错，默认监听
-        EPOLLET：在监听的文件上开启ET模式
-        EPOLLHUP：文件被挂起，默认监听
-        EPOLLIN：文件未阻塞，可读
-        EPOLLOUT：文件未阻塞，可写
-        EPOLLONESHOT：事件生成并处理的过程中，被epoll自动移除，防止多线程同时操作一个文件描述符。如果还要继续监听的话，需要手动加入。
-        EPOLLPRI：带外数据可读。
-    epoll_create错误标志：
-        EINVAL：参数flags非法（基本弃用）
-        EMFILE：用户打开文件到达上限
-        ENFILE：系统打开文件到达上限
-        ENOMEN：内存不足，不能完成此次操作
-    epoll_ctl错误标志：
-        EBADF：epollfd非法或者fd非法
-        EEXIST：op值为EPOLL_CTL_ADD，但是fd已经和epollfd关联
-        EINVAL：epollfd不是epoll实例，epollfd和fd相同或者op无效
-        ENOENT：op值设置为EPOLL_CTL_MOD或者EPOLL_CTL_DEL，但是epollfd和fd没有关联
-        ENOMEN：没有足够的内存来处理请求
-        EPERM：fd不支持epoll
-    epoll_wait错误标志：
-        EBADF：epollfd是无效的文件描述符
-        EFAULT：进程对events所指向的内存没有写权限
-        EINTR：系统调用在完成前发生信号中断或者超时
-        EINVAL：epollfd不是有效的epoll实例，或者maxevents小于0
-    epoll_ctl操作类型：
-        EPOLL_CTL_ADD：将fd描述的事件添加到epollfd关注的事件中
-        EPOLL_CTL_DEL：删除epollfd中fd描述的事件
-        EPOLL_CTL_MOD：修改epollfd中fd描述的事件
-    工作方式：
-        LT（Level Triggered）
-            Epoll缺省的工作方式，相当于一个速度比较快的Poll。
-            收到多次数据会触发多次事件，内核仅仅告诉你一个事件发生了，如果你不处理，内核会继续通知你。在异步模型中，这样的特性会影响事件的处理方式。
-            同时支持阻塞与非阻塞两种IO模型
-        ET（Edge Triggered）：
-            需要使用EPOLLET来设置
-            使用epoll_wait获得事件后，如果这次没有将内核缓冲区中的数据处理干净，如果没有新的数据到达（再一次触发事件），将没法从epoll_wait获取事件
-            仅支持非阻塞的IO模型
+注意事项：
+	调用epoll_create时，返回一个内核维护的描述符，往后的所有操作依赖于这个描述符。size参数没什么用处，保证大于0就行。
+	调用epoll_ctl可以动态的改变内核维护的表格。在epollfd中加入和修改一个fd关注的事件时，需要用户提供event实例；在epollfd中删除一个fd时，传入保存数据的struct epoll_event结构体或者NULL
+	调用epoll_wait时，提供从epoll_create中获得描述符，和事先准备好的数组，最大的事件个数以及超时时间。在完成后，内核会将发生事件的struct epoll_event*拷贝到用户空间
+事件类型：
+	EPOLLERR：文件出错，默认监听
+	EPOLLET：在监听的文件上开启ET模式
+	EPOLLHUP：文件被挂起，默认监听
+	EPOLLIN：文件未阻塞，可读
+	EPOLLOUT：文件未阻塞，可写
+	EPOLLONESHOT：事件生成并处理的过程中，被epoll自动移除，防止多线程同时操作一个文件描述符。如果还要继续监听的话，需要手动加入。
+	EPOLLPRI：带外数据可读。
+epoll_create错误标志：
+	EINVAL：参数flags非法（基本弃用）
+	EMFILE：用户打开文件到达上限
+	ENFILE：系统打开文件到达上限
+	ENOMEN：内存不足，不能完成此次操作
+epoll_ctl错误标志：
+	EBADF：epollfd非法或者fd非法
+	EEXIST：op值为EPOLL_CTL_ADD，但是fd已经和epollfd关联
+	EINVAL：epollfd不是epoll实例，epollfd和fd相同或者op无效
+	ENOENT：op值设置为EPOLL_CTL_MOD或者EPOLL_CTL_DEL，但是epollfd和fd没有关联
+	ENOMEN：没有足够的内存来处理请求
+	EPERM：fd不支持epoll
+epoll_wait错误标志：
+	EBADF：epollfd是无效的文件描述符
+	EFAULT：进程对events所指向的内存没有写权限
+	EINTR：系统调用在完成前发生信号中断或者超时
+	EINVAL：epollfd不是有效的epoll实例，或者maxevents小于0
+epoll_ctl操作类型：
+	EPOLL_CTL_ADD：将fd描述的事件添加到epollfd关注的事件中
+	EPOLL_CTL_DEL：删除epollfd中fd描述的事件
+	EPOLL_CTL_MOD：修改epollfd中fd描述的事件
+工作方式：
+	LT（Level Triggered）
+		Epoll缺省的工作方式，相当于一个速度比较快的Poll。
+		收到多次数据会触发多次事件，内核仅仅告诉你一个事件发生了，如果你不处理，内核会继续通知你。在异步模型中，这样的特性会影响事件的处理方式。
+		同时支持阻塞与非阻塞两种IO模型
+	ET（Edge Triggered）：
+		需要使用EPOLLET来设置
+		使用epoll_wait获得事件后，如果这次没有将内核缓冲区中的数据处理干净，如果没有新的数据到达（再一次触发事件），将没法从epoll_wait获取事件
+		仅支持非阻塞的IO模型
 
 性能分析
 

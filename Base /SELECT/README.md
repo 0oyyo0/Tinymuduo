@@ -14,28 +14,28 @@ FD_ZERO(fd* fd_set);
 ```
 ### 基本操作
 
-    注意事项：
-        参数n描述的是最大的文件描述符+1
-        如果struct timeval* timeout指针的为0，select立即返回；如果为NULL，则select永久的阻塞，直到某个文件描述符准备就绪；如果由定时时间，则阻塞固定的时间
-        每次调用select之前都要重新设置文件描述符数组。
-        返回的val描述事件发生的次数。假设同时监听一个描述符的三个事件，如果事件发生的话，会返回3。
-    错误标志：
-        EBADF：某个集合中存在非法的文件描述符
-        EINTR：等待时捕获了一个信号，可以重新发起调用
-        EINVAL：参数n是负数或者设置的超时时间非非法
-        ENOMEM：没有足够的内存完成请求
-    触发读事件：
-        socket内核接受缓冲区的字节数大于SO_RCVLOWAT，一般为1。（可以使用非阻塞IO进行处理）
-        socket通信的对方关闭连接
-        监听socket上有新的连接请求
-        socket上有未处理的错误，可以使用getsocketopt进行清除。
-    触发写事件：
-        socket内核发送缓冲区的字节数大于SO_SNDLOWAT，一般为1。（可以使用非阻塞IO进行处理）
-        socket的写操作被关闭。对写操作被管理的socket执行写操作将会触发一个SIGPIPE的信号
-        socket上使用非阻塞的connect连接成功或者失败
-        socket上由未处理的错误，可以使用getsocketopt进行清除。
-    触发异常事件：
-        带外数据到达
+注意事项：
+	参数n描述的是最大的文件描述符+1
+	如果struct timeval* timeout指针的为0，select立即返回；如果为NULL，则select永久的阻塞，直到某个文件描述符准备就绪；如果由定时时间，则阻塞固定的时间
+	每次调用select之前都要重新设置文件描述符数组。
+	返回的val描述事件发生的次数。假设同时监听一个描述符的三个事件，如果事件发生的话，会返回3。
+错误标志：
+	EBADF：某个集合中存在非法的文件描述符
+	EINTR：等待时捕获了一个信号，可以重新发起调用
+	EINVAL：参数n是负数或者设置的超时时间非非法
+	ENOMEM：没有足够的内存完成请求
+触发读事件：
+	socket内核接受缓冲区的字节数大于SO_RCVLOWAT，一般为1。（可以使用非阻塞IO进行处理）
+	socket通信的对方关闭连接
+	监听socket上有新的连接请求
+	socket上有未处理的错误，可以使用getsocketopt进行清除。
+触发写事件：
+	socket内核发送缓冲区的字节数大于SO_SNDLOWAT，一般为1。（可以使用非阻塞IO进行处理）
+	socket的写操作被关闭。对写操作被管理的socket执行写操作将会触发一个SIGPIPE的信号
+	socket上使用非阻塞的connect连接成功或者失败
+	socket上由未处理的错误，可以使用getsocketopt进行清除。
+触发异常事件：
+	带外数据到达
 
 性能分析：
 
