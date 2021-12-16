@@ -2,7 +2,7 @@
 
 ## 单线程情况下muduo库的工作
 
-+ 下面将详细讲述在muduo网络库中一次TCP连接过程中发生的事情，不会出现用户态的源码，都是库内部的运行机制。
++ 下面将详细描述muduo网络库中一次TCP连接过程中发生的事情，不会出现业务逻辑的代码，都是库内部的运行机制。
 ### 把监听套接字加入loop循环
 + 首先创建一个TcpServer对象，在构造函数中，先new出来自己的核心组件(Acceptor,loop,connectionMap,threadPool)，之后TcpServer会向Acceptor注册一个新连接到来时的回调函数newConnection，用于处理一个新Client连接到来时应该怎么做的问题。
 + TcpServer向Acceptor注册的回调函数newConnection的主要作用是：当一个新连接到来时，根据Acceptor创建的可连接描述符sockfd和客户的地址peerAddr，创建一个TcpConnection对象，并且将这个对象加入到TcpServer的ConnectionMap中，由TcpServer来管理上述新建的TcpConnection对象。目前为止监听套接字的事件分发对象Channel还没有加入loop，就先不多提这个新的连接到到来时的处理过程，后面再详述。
